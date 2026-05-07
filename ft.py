@@ -28,9 +28,16 @@ def recv_line(sock: socket.socket, max_len: int = MAX_FILENAME_LEN) -> bytes:
     Returns the line including everything before '\n' (without '\n').
     Raises a ValueError if more data than max_len is received.
     """
-    data = bytearray()
     while True:
-        # TODO: write your code here.
+        ch = sock.recv(1)
+        if not ch:
+            raise ConnectionError("Connection is closed before new line")
+        if ch == b'\n':
+            return bytes(data)
+        data += ch
+        if len(data) > max_len:
+            raise ValueError("The line is too long")
+            #if the length of data is greater than the maximum length then raise an error that the line is too long
 
 ##########
 # Server #
@@ -51,14 +58,14 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
             filename = raw_line.decode('utf-8')
         except UnicodeDecodeError:
             # Send LINE_ERR if filename is not valid UTF-8.
-            # TODO: write your code here.
+            conn.sendall(LINE_ERR)
             return
 
         # Sanitize filename (strip directory components).
         filename = os.path.basename(filename)
         if filename == '':
             # Send LINE_ERR if invalid filename.
-            # TODO: write your code here.
+            conn.sendall(LINE_ERR)
             return
 
         # Prepare output path.
@@ -68,15 +75,21 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
         # Check if file already exists.
         if os.path.exists(dest_path):
             # Send LINE_ERR if file exists.
-            # TODO: write your code here.
+            conn.sendall(LINE_ERR)
             return
         else:
             # Send LINE_OK to proceed.
-            # TODO: write your code here.
+            conn.sendall(LINE_OK)
 
         # Receive 8-byte unsigned integer (network byte order).
         hdr = bytearray()
-        # TODO: write your code here.
+        while len(hdr) < 8:
+            chunk = conn.recv(8 - len(hdr))
+            if not chunk:
+                raise ConnectionError("connection closed while receiving file data")
+            
+        
+        conn.sendall(LINE_OK)
 
         (file_size,) = struct.unpack('!Q', hdr)
 
@@ -86,7 +99,8 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
             with open(dest_path, 'wb') as f:
                 while remaining > 0:
                     # Receive a chunk (up to BUFSIZE or remaining).
-                    # TODO: write your code here.
+                    chunk = conn.recv(min(BUFSIZE, remaining))
+                    if not chunk:
                     f.write(chunk)
                     remaining -= len(chunk)
                 f.flush()
@@ -100,7 +114,7 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
             raise
 
         # Send final LINE_OK to acknowledge successful receipt.
-        # TODO: write your code here.
+        conn.sendall(LINE_OK)
 
     except Exception:
         # Swallow exceptions to keep server alive; optionally could log
@@ -117,7 +131,25 @@ def run_server(port: int, outdir: str, ipv6: bool) -> None:
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
     bind_addr = '::' if ipv6 else '0.0.0.0'
     # Create server socket, bind, listen, and accept in an infinite loop.
-    # TODO: write your code here.
+    with socket.socket(family, socket.SOCK_STREAM) as srv:
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if ipv6:
+            try:
+                srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            except OSError:
+                pass
+        srv.bind((bind_addr, port))
+        srv.listen(1)
+
+        while True:
+            conn, _addr = srv.accept()
+            with conn:
+                handle_client(conn, outdir)
+
+
+
+
+
 
 
 ##########
@@ -138,7 +170,36 @@ def run_client(server_ip: str, port: int, file_path: str, ipv6: bool) -> int:
 
     # Send filename, size, and file content (in chunks).
     # Wait for server responses according to protocol.
-    # TODO: write your code here.
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.connect(addr)
+
+            sock.sendall(filename.encode('utf-8') + b'\n')
+
+            reply = recv_line(sock)
+            if reply == b'ERR':
+                return 1
+            if reply != b'OK':
+                return 255
+            
+            sock.sendall(struct.pack('!Q', file_size))
+
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(BUFSIZE)
+                    if not chunk:
+                        break
+                    sock.sendall(chunk)
+
+            final_reply = recv_line(sock)
+            if final_reply == b'OK':
+                return 0
+            if final_reply == b'ERR':
+                return 1
+            return 255
+
+    except Exception:
+        return 255
 
 
 ################
