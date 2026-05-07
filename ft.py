@@ -28,16 +28,16 @@ def recv_line(sock: socket.socket, max_len: int = MAX_FILENAME_LEN) -> bytes:
     Returns the line including everything before '\n' (without '\n').
     Raises a ValueError if more data than max_len is received.
     """
+    data = bytearray()
     while True:
         ch = sock.recv(1)
         if not ch:
-            raise ConnectionError("Connection is closed before new line")
+            raise ConnectionError("connection closed before newline")
         if ch == b'\n':
             return bytes(data)
-        data += ch
+        data.extend(ch)
         if len(data) > max_len:
-            raise ValueError("The line is too long")
-            #if the length of data is greater than the maximum length then raise an error that the line is too long
+            raise ValueError("line too long")
 
 ##########
 # Server #
@@ -46,7 +46,7 @@ def recv_line(sock: socket.socket, max_len: int = MAX_FILENAME_LEN) -> bytes:
 def handle_client(conn: socket.socket, outdir: str) -> None:
     """Handle a single client:
     1) Read filepath and sanitise it.
-    2) Check existence of <outdir>/<filename>-received
+    2) Check existence of /-received
     3) Reply LINE_OK/LINE_ERR accordingly
     4) If LINE_OK, receive length and payload, write file, and send final LINE_OK.
     On any error, send LINE_ERR and return.
@@ -86,10 +86,8 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
         while len(hdr) < 8:
             chunk = conn.recv(8 - len(hdr))
             if not chunk:
-                raise ConnectionError("connection closed while receiving file data")
-            
-        
-        conn.sendall(LINE_OK)
+                raise ConnectionError("connection closed while receiving size")
+            hdr.extend(chunk)
 
         (file_size,) = struct.unpack('!Q', hdr)
 
@@ -101,6 +99,7 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
                     # Receive a chunk (up to BUFSIZE or remaining).
                     chunk = conn.recv(min(BUFSIZE, remaining))
                     if not chunk:
+                        raise ConnectionError("connection closed while receiving file data")
                     f.write(chunk)
                     remaining -= len(chunk)
                 f.flush()
@@ -120,16 +119,16 @@ def handle_client(conn: socket.socket, outdir: str) -> None:
         # Swallow exceptions to keep server alive; optionally could log
         try:
             # Best-effort negative acknowledgement if we failed before final OK
-            pass
+            conn.sendall(LINE_ERR)
         except Exception:
             pass
         return
-
 
 def run_server(port: int, outdir: str, ipv6: bool) -> None:
     """Start the TCP file transfer server."""
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
     bind_addr = '::' if ipv6 else '0.0.0.0'
+
     # Create server socket, bind, listen, and accept in an infinite loop.
     with socket.socket(family, socket.SOCK_STREAM) as srv:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -145,12 +144,6 @@ def run_server(port: int, outdir: str, ipv6: bool) -> None:
             conn, _addr = srv.accept()
             with conn:
                 handle_client(conn, outdir)
-
-
-
-
-
-
 
 ##########
 # Client #
@@ -181,7 +174,7 @@ def run_client(server_ip: str, port: int, file_path: str, ipv6: bool) -> int:
                 return 1
             if reply != b'OK':
                 return 255
-            
+
             sock.sendall(struct.pack('!Q', file_size))
 
             with open(file_path, 'rb') as f:
@@ -200,7 +193,6 @@ def run_client(server_ip: str, port: int, file_path: str, ipv6: bool) -> int:
 
     except Exception:
         return 255
-
 
 ################
 # Main program #
@@ -238,7 +230,7 @@ def main(argv=None) -> int:
         server_ip = DEFAULT_IPV6_ADDRESS if args.ipv6 else DEFAULT_IPV4_ADDRESS
 
     if not args.file_path:
-        print('Client mode requires --file <path>', file=sys.stderr)
+        print('Client mode requires --file', file=sys.stderr)
         return 2
 
     rc = run_client(server_ip, args.port, args.file_path, ipv6=args.ipv6)
@@ -246,3 +238,5 @@ def main(argv=None) -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
