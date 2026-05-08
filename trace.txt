@@ -1,0 +1,4 @@
+dig @198.41.0.4 www.jamb.gov.ng +norecurse
+dig @204.61.216.40 www.jamb.gov.ng +norecurse
+dig @51.145.133.225 www.jamb.gov.ng +norecurse
+dig @104.42.79.100 www.jamb.gov.ng +norecurse
