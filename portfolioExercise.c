@@ -101,7 +101,7 @@ int main( int argc, char **argv )
     for( int t=0; t<nThreads; t++ )
     {
         tArgs[t].threadID = t;
-        pthread_create( &threads[t], NULL, threadFunc, &tArgs[t] );
+        pthread_create( &threads[t], NULL, ThreadFunc, &tArgs[t] );
     }
  
     // Join all threads.
